@@ -158,26 +158,64 @@
 
   // 续聊重传附件专用：绕过网页 fetch，直接走原生桥上传，返回 serverId。
   window.__dsUploadAttachment = function(apiKey, blob, name, isImage, purpose){
+    log('__dsUploadAttachment 调用 name='+name+' blobSize='+(blob&&blob.size)+' isImage='+isImage+' key='+(apiKey?apiKey.slice(0,6):'空'));
+    if(!blob){ log('__dsUploadAttachment blob为空，直接失败'); return Promise.reject(new Error('empty blob')); }
     return toB64(blob).then(function(b64){
+      log('__dsUploadAttachment b64完成 len='+b64.length);
       return new Promise(function(resolve, reject){
         var id='up_'+Date.now()+'_'+Math.random().toString(36).slice(2);
         window.__dsUploadCbs=window.__dsUploadCbs||{};
         window.__dsUploadCbs[id]=function(json, ok){
+          log('__dsUploadAttachment 回调 ok='+ok+' json='+String(json).slice(0,200));
           try{
             if(ok===false){ reject(new Error('upload failed')); return; }
             var obj = (typeof json==='string') ? JSON.parse(json) : json;
             var sid = obj && (obj.id || (obj.file&&obj.file.id));
-            if(sid) resolve(sid);
-            else reject(new Error('no file id'));
+            if(sid){ log('__dsUploadAttachment 成功 sid='+sid); resolve(sid); }
+            else { log('__dsUploadAttachment 无file id'); reject(new Error('no file id')); }
           }catch(e){ reject(e); }
         };
         var type = blob && blob.type || (isImage?'image/jpeg':'application/octet-stream');
-        try{ window.DSNative.uploadFile(id, apiKey, b64, name||'upload', type, purpose||'', 'apikey', 'files'); }
-        catch(e){ reject(e); }
+        try{ window.DSNative.uploadFile(id, apiKey, b64, name||'upload', type, purpose||'', 'apikey', 'files'); log('__dsUploadAttachment 已调原生'); }
+        catch(e){ log('__dsUploadAttachment 调原生异常 '+e.message); reject(e); }
       });
     });
   };
   log('bridge installed');
+})();
+</script>
+<script>
+// ===== 运行监控：捕获所有 console/错误 + 导出日志按钮 =====
+(function(){
+  function J(msg){ try{ if(window.DSNative&&window.DSNative.log) window.DSNative.log('[MON] '+msg); }catch(e){} }
+  J('监控启动');
+  // console 全捕获
+  ['log','warn','error','info'].forEach(function(k){
+    var orig=console[k];
+    if(typeof orig!=='function')return;
+    console[k]=function(){
+      try{ var a=Array.prototype.map.call(arguments,function(x){return typeof x==='object'?JSON.stringify(x):String(x)}).join(' '); J('console.'+k+': '+a.slice(0,300)); }catch(e){}
+      return orig.apply(console,arguments);
+    };
+  });
+  // 未捕获异常/Promise错误
+  window.addEventListener('error',function(ev){ J('JS错误 '+String(ev.message).slice(0,150)+' @'+(ev.filename||'').split('/').pop()+':'+ev.lineno); });
+  window.addEventListener('unhandledrejection',function(ev){ J('Promise拒绝 '+String(ev.reason&&ev.reason.message||ev.reason).slice(0,200)); });
+  // 浮动的"导出日志"按钮
+  function addBtn(){
+    try{
+      if(document.getElementById('__dsLogBtn'))return;
+      var b=document.createElement('button');
+      b.id='__dsLogBtn';
+      b.textContent='日志';
+      b.style.cssText='position:fixed;left:8px;top:50%;transform:translateY(-50%);z-index:99999;width:44px;height:44px;border-radius:22px;border:none;background:rgba(0,120,255,.75);color:#fff;font-size:13px;opacity:.7';
+      b.onclick=function(e){ e.stopPropagation(); try{window.DSNative.exportLog()}catch(err){alert('导出失败:'+err.message)} };
+      (document.body||document.documentElement).appendChild(b);
+      J('日志按钮已添加');
+    }catch(e){ J('按钮添加失败 '+e.message); }
+  }
+  if(document.body) addBtn(); else document.addEventListener('DOMContentLoaded',addBtn);
+  setTimeout(addBtn,1500);
 })();
 </script>
 <script defer src="static/js/main.4fc5bb07.js"></script><link href="static/css/main.27198ffe.css" rel="stylesheet"></head><body><div id="root"></div></body></html>
