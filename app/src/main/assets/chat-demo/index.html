@@ -73,6 +73,17 @@
     }
     var isFiles = url.indexOf('/anthropic/v1/files')>=0 || url.indexOf('/files')>=0;
     var isAsr = url.indexOf('/tools/asr')>=0 || url.indexOf('/asr')>=0;
+    var isMessages = url.indexOf('/messages')>=0;
+    if(isMessages){
+      log('MESSAGES 请求发出 method='+(opt.method||(req&&req.method)||'GET')+' url='+url.slice(-40));
+      try{
+        var p = nativeFetch.apply(this, arguments);
+        return p.then(function(resp){
+          log('MESSAGES 返回 status='+(resp&&resp.status)+' ok='+(resp&&resp.ok));
+          return resp;
+        }).catch(function(e){ log('MESSAGES 网络异常 '+e.message); throw e; });
+      }catch(e){ log('MESSAGES 发出异常 '+e.message); }
+    }
     if(isFiles || isAsr){
       try{
         var body0 = opt.body || null;
