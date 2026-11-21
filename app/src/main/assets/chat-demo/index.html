@@ -209,7 +209,25 @@
       b.id='__dsLogBtn';
       b.textContent='日志';
       b.style.cssText='position:fixed;left:8px;top:50%;transform:translateY(-50%);z-index:99999;width:44px;height:44px;border-radius:22px;border:none;background:rgba(0,120,255,.75);color:#fff;font-size:13px;opacity:.7';
-      b.onclick=function(e){ e.stopPropagation(); try{window.DSNative.exportLog()}catch(err){alert('导出失败:'+err.message)} };
+      b.onclick=function(e){
+        e.stopPropagation();
+        // 快照：扫描页面上"上传失败/上传中"的附件元素
+        try{
+          var nodes=document.querySelectorAll('*'), cnt=0;
+          for(var i=0;i<nodes.length && cnt<20;i++){
+            var el=nodes[i];
+            if(el.children.length) continue; // 只看叶子文本节点
+            var tx=(el.textContent||'').trim();
+            if(tx.indexOf('上传失败')>=0 || tx.indexOf('上传中')>=0){
+              var par=el.parentElement, title=par?(par.getAttribute('title')||par.getAttribute('aria-label')||''):'';
+              J('页面附件状态 "'+tx.slice(0,20)+'" title='+String(title).slice(0,40));
+              cnt++;
+            }
+          }
+          J('快照完成 匹配'+cnt+'个');
+        }catch(e){ J('快照异常 '+e.message); }
+        try{window.DSNative.exportLog()}catch(err){alert('导出失败:'+err.message)}
+      };
       (document.body||document.documentElement).appendChild(b);
       J('日志按钮已添加');
     }catch(e){ J('按钮添加失败 '+e.message); }
