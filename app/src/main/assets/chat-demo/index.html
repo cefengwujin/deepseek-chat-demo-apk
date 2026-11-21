@@ -225,8 +225,11 @@
             if(!el.children.length){
               var tx=(el.textContent||'').trim();
               if((tx.indexOf('上传失败')>=0 || tx.indexOf('上传中')>=0 || tx.indexOf('retry')>=0 || tx.indexOf('upload')>=0) && tx.length<60){
-                var par=el.parentElement;
-                J('错误文字 "'+tx+'" |父title='+(par&&(par.getAttribute('title')||'')).slice(0,40));
+                // 记录祖先链，确定这是哪个组件
+                var chain=[], p=el, depth=0;
+                while(p && depth<5){ chain.push(p.tagName.toLowerCase()+'.'+String(p.className||'').slice(0,25)); p=p.parentElement; depth++; }
+                J('错误文字 "'+tx+'" 祖先链='+chain.join(' < '));
+                J('错误元素outerHTML='+el.parentElement.outerHTML.slice(0,300));
                 cnt++;
               }
             }
