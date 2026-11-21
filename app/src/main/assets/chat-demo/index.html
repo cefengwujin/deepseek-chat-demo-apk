@@ -31,7 +31,6 @@
 (function(){
   if(window.__dsUploadBridge) return;
   window.__dsUploadBridge = true;
-  function log(s){ try{ if(window.DSNative && window.DSNative.log) window.DSNative.log('[upl] '+s); }catch(e){} }
 
   var nativeFetch = window.fetch;
   if(!nativeFetch) return;
@@ -73,24 +72,7 @@
     }
     var isFiles = url.indexOf('/anthropic/v1/files')>=0 || url.indexOf('/files')>=0;
     var isAsr = url.indexOf('/tools/asr')>=0 || url.indexOf('/asr')>=0;
-    var isMessages = url.indexOf('/messages')>=0;
-    if(isMessages){
-      log('MESSAGES 请求发出 method='+(opt.method||(req&&req.method)||'GET')+' url='+url.slice(-40));
-      try{
-        var p = nativeFetch.apply(this, arguments);
-        return p.then(function(resp){
-          log('MESSAGES 返回 status='+(resp&&resp.status)+' ok='+(resp&&resp.ok));
-          return resp;
-        }).catch(function(e){ log('MESSAGES 网络异常 '+e.message); throw e; });
-      }catch(e){ log('MESSAGES 发出异常 '+e.message); }
-    }
     if(isFiles || isAsr){
-      try{
-        var body0 = opt.body || null;
-        var f0 = body0 && body0.get ? body0.get('file') : null;
-        if(window.DSNative && window.DSNative.toast)
-          window.DSNative.toast('拦到上传 '+(isAsr?'ASR':'files')+' file='+(f0?(f0.name||'?')+'/'+(f0.size||0):'无'));
-      }catch(e){}
       try{
         var body = opt.body || null;
         var method = (opt.method || (req && req.method) || 'GET').toUpperCase();
@@ -123,7 +105,7 @@
               try{ window.DSNative.uploadFile(id,apiKey,b64,name,type,purpose||'',authKind,isAsr?'asr':'files'); }
               catch(e){ reject(e); }
             });
-          }).catch(function(e){ log('A ERR '+e.message); throw e; });
+          });
         }
         // 情况B：Request 对象携带 FormData
         if(req && req.clone){
@@ -154,7 +136,7 @@
             }).catch(function(e){ return nativeFetch.apply(window,arguments); });
           }catch(e){}
         }
-      }catch(e){ log('detect ERR '+e.message); }
+      }catch(e){}
     }
     return nativeFetch.apply(this, arguments);
   };
@@ -169,92 +151,26 @@
 
   // 续聊重传附件专用：绕过网页 fetch，直接走原生桥上传，返回 serverId。
   window.__dsUploadAttachment = function(apiKey, blob, name, isImage, purpose){
-    log('__dsUploadAttachment 调用 name='+name+' blobSize='+(blob&&blob.size)+' isImage='+isImage+' key='+(apiKey?apiKey.slice(0,6):'空'));
-    if(!blob){ log('__dsUploadAttachment blob为空，直接失败'); return Promise.reject(new Error('empty blob')); }
+    if(!blob) return Promise.reject(new Error('empty blob'));
     return toB64(blob).then(function(b64){
-      log('__dsUploadAttachment b64完成 len='+b64.length);
       return new Promise(function(resolve, reject){
         var id='up_'+Date.now()+'_'+Math.random().toString(36).slice(2);
         window.__dsUploadCbs=window.__dsUploadCbs||{};
         window.__dsUploadCbs[id]=function(json, ok){
-          log('__dsUploadAttachment 回调 ok='+ok+' json='+String(json).slice(0,200));
           try{
             if(ok===false){ reject(new Error('upload failed')); return; }
             var obj = (typeof json==='string') ? JSON.parse(json) : json;
             var sid = obj && (obj.id || (obj.file&&obj.file.id));
-            if(sid){ log('__dsUploadAttachment 成功 sid='+sid); resolve(sid); }
-            else { log('__dsUploadAttachment 无file id'); reject(new Error('no file id')); }
+            if(sid) resolve(sid);
+            else reject(new Error('no file id'));
           }catch(e){ reject(e); }
         };
         var type = blob && blob.type || (isImage?'image/jpeg':'application/octet-stream');
-        try{ window.DSNative.uploadFile(id, apiKey, b64, name||'upload', type, purpose||'', 'apikey', 'files'); log('__dsUploadAttachment 已调原生'); }
-        catch(e){ log('__dsUploadAttachment 调原生异常 '+e.message); reject(e); }
+        try{ window.DSNative.uploadFile(id, apiKey, b64, name||'upload', type, purpose||'', 'apikey', 'files'); }
+        catch(e){ reject(e); }
       });
     });
   };
-  log('bridge installed');
-})();
-</script>
-<script>
-// ===== 运行监控：捕获所有 console/错误 + 导出日志按钮 =====
-(function(){
-  function J(msg){ try{ if(window.DSNative&&window.DSNative.log) window.DSNative.log('[MON] '+msg); }catch(e){} }
-  J('监控启动');
-  // console 全捕获
-  ['log','warn','error','info'].forEach(function(k){
-    var orig=console[k];
-    if(typeof orig!=='function')return;
-    console[k]=function(){
-      try{ var a=Array.prototype.map.call(arguments,function(x){return typeof x==='object'?JSON.stringify(x):String(x)}).join(' '); J('console.'+k+': '+a.slice(0,300)); }catch(e){}
-      return orig.apply(console,arguments);
-    };
-  });
-  // 未捕获异常/Promise错误
-  window.addEventListener('error',function(ev){ J('JS错误 '+String(ev.message).slice(0,150)+' @'+(ev.filename||'').split('/').pop()+':'+ev.lineno); });
-  window.addEventListener('unhandledrejection',function(ev){ J('Promise拒绝 '+String(ev.reason&&ev.reason.message||ev.reason).slice(0,200)); });
-  // 浮动的"导出日志"按钮
-  function addBtn(){
-    try{
-      if(document.getElementById('__dsLogBtn'))return;
-      var b=document.createElement('button');
-      b.id='__dsLogBtn';
-      b.textContent='日志';
-      b.style.cssText='position:fixed;left:8px;top:50%;transform:translateY(-50%);z-index:99999;width:44px;height:44px;border-radius:22px;border:none;background:rgba(0,120,255,.75);color:#fff;font-size:13px;opacity:.7';
-      b.onclick=function(e){
-        e.stopPropagation();
-        // 快照：扫描 body 内真正渲染的附件元素（排除 script/style）
-        try{
-          var nodes=document.body.querySelectorAll('*'), cnt=0, titled=0;
-          for(var i=0;i<nodes.length;i++){
-            var el=nodes[i];
-            var tag=el.tagName.toLowerCase();
-            if(tag==='script'||tag==='style') continue;
-            // 带 title 的元素（附件缩略图通常带文件名 title）
-            var title=el.getAttribute&&el.getAttribute('title');
-            if(title && titled<25){ J('元素 title='+String(title).slice(0,45)+' cls='+String(el.className||'').slice(0,30)); titled++; }
-            // 叶子节点的错误文字
-            if(!el.children.length){
-              var tx=(el.textContent||'').trim();
-              if((tx.indexOf('上传失败')>=0 || tx.indexOf('上传中')>=0 || tx.indexOf('retry')>=0 || tx.indexOf('upload')>=0) && tx.length<60){
-                // 记录祖先链，确定这是哪个组件
-                var chain=[], p=el, depth=0;
-                while(p && depth<5){ chain.push(p.tagName.toLowerCase()+'.'+String(p.className||'').slice(0,25)); p=p.parentElement; depth++; }
-                J('错误文字 "'+tx+'" 祖先链='+chain.join(' < '));
-                J('错误元素outerHTML='+el.parentElement.outerHTML.slice(0,300));
-                cnt++;
-              }
-            }
-          }
-          J('快照完成 错误'+cnt+'个 title元素'+titled+'个');
-        }catch(e){ J('快照异常 '+e.message); }
-        try{window.DSNative.exportLog()}catch(err){alert('导出失败:'+err.message)}
-      };
-      (document.body||document.documentElement).appendChild(b);
-      J('日志按钮已添加');
-    }catch(e){ J('按钮添加失败 '+e.message); }
-  }
-  if(document.body) addBtn(); else document.addEventListener('DOMContentLoaded',addBtn);
-  setTimeout(addBtn,1500);
 })();
 </script>
 <script defer src="static/js/main.debug8.js"></script><link href="static/css/main.27198ffe.css" rel="stylesheet"></head><body><div id="root"></div></body></html>
