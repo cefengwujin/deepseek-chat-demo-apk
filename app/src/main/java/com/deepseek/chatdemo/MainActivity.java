@@ -46,6 +46,19 @@ import java.util.UUID;
 public class MainActivity extends Activity {
 
     private static final String TAG = "DSChatAPK";
+    // 运行日志缓冲（线程安全），用于导出诊断
+    private final StringBuffer logBuffer = new StringBuffer();
+    private static final int LOG_MAX = 20000;
+    private void logAll(String tag, String msg) {
+        try {
+            String line = java.text.DateFormat.getDateTimeInstance().format(new java.util.Date()) + " " + tag + " " + msg + "\n";
+            synchronized (logBuffer) {
+                if (logBuffer.length() > LOG_MAX) logBuffer.delete(0, logBuffer.length() - LOG_MAX);
+                logBuffer.append(line);
+            }
+            Log.d(TAG, tag + " " + msg);
+        } catch (Exception ignored) {}
+    }
     // 本地内置官方 chat-demo（低审核版）。用本地 HTTP 服务提供，
     // 让页面有正常的 http origin（file:// 下getUserMedia/文件选择等能力被限制）。
     private static final int LOCAL_PORT = 8899;
@@ -251,18 +264,27 @@ public class MainActivity extends Activity {
     public class NativeBridge {
         @JavascriptInterface
         public void log(String msg) {
-            Log.d(TAG, msg);
+            logAll("JS", msg);
         }
 
         @JavascriptInterface
         public void toast(String msg) {
+            logAll("TOAST", msg);
             toastOnUi("[桥]" + msg);
+        }
+
+        @JavascriptInterface
+        public void exportLog() {
+            publishLog();
         }
 
         @JavascriptInterface
         public void uploadFile(String id, String apiKey, String base64,
                                String fileName, String mime, String purpose,
                                String authKind, String uploadKind) {
+            logAll("UPLOAD", "收到 id=" + id + " kind=" + uploadKind + " name=" + fileName
+                    + " size=" + (base64==null?0:base64.length()) + " purpose=" + purpose
+                    + " key=" + (apiKey==null?"null":apiKey.isEmpty()?"空":apiKey.substring(0,Math.min(6,apiKey.length()))+"..."));
             new Thread(() -> doUpload(id, apiKey, base64, fileName, mime, purpose, authKind, uploadKind), "ds-upload").start();
         }
     }
@@ -319,6 +341,7 @@ public class MainActivity extends Activity {
             ok = (code >= 200 && code < 300);
             resultJson = resp == null || resp.isEmpty() ? "{}" : resp;
             Log.d(TAG, "upload code=" + code + " resp=" + resultJson.substring(0, Math.min(200, resultJson.length())));
+            logAll("UPLOAD", "返回 code=" + code + " ok=" + ok + " resp=" + resultJson.substring(0, Math.min(300, resultJson.length())));
             if (!ok) {
                 final String brief = "上传失败 code=" + code + " " + resultJson.substring(0, Math.min(120, resultJson.length()));
                 runOnUiThread(() -> toastOnUi(brief));
@@ -543,6 +566,41 @@ public class MainActivity extends Activity {
                 Log.e(TAG, "saveChunk failed", e);
                 toastOnUi("导出失败：" + e.getMessage());
             }
+        }
+    }
+
+    private void publishLog() {
+        try {
+            String name = "ds_debug_log.txt";
+            String text;
+            synchronized (logBuffer) { text = logBuffer.toString(); }
+            File tmp = new File(getCacheDir(), "ds_log_tmp.txt");
+            try (OutputStream out = new FileOutputStream(tmp)) {
+                out.write(text.getBytes(StandardCharsets.UTF_8));
+            }
+            String shownPath;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContentValues cv = new ContentValues();
+                cv.put(MediaStore.Downloads.DISPLAY_NAME, name);
+                cv.put(MediaStore.Downloads.MIME_TYPE, "text/plain");
+                cv.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+                Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+                if (uri == null) throw new IllegalStateException("MediaStore 返回空");
+                try (OutputStream out = getContentResolver().openOutputStream(uri);
+                     InputStream in = new FileInputStream(tmp)) { copy(in, out); }
+                shownPath = "下载/" + name;
+            } else {
+                File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                if (!dir.exists()) dir.mkdirs();
+                File dst = new File(dir, name);
+                try (OutputStream out = new FileOutputStream(dst);
+                     InputStream in = new FileInputStream(tmp)) { copy(in, out); }
+                shownPath = dst.getAbsolutePath();
+            }
+            toastOnUi("日志已导出 " + shownPath + " (" + text.length() + "字符)");
+        } catch (Exception e) {
+            logAll("EXPORT", "failed " + e.getMessage());
+            toastOnUi("日志导出失败：" + e.getMessage());
         }
     }
 
