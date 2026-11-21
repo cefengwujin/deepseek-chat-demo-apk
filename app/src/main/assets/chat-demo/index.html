@@ -155,6 +155,28 @@
       if(cb){ delete window.__dsUploadCbs[id]; cb(json, ok); }
     }catch(e){}
   };
+
+  // 续聊重传附件专用：绕过网页 fetch，直接走原生桥上传，返回 serverId。
+  window.__dsUploadAttachment = function(apiKey, blob, name, isImage, purpose){
+    return toB64(blob).then(function(b64){
+      return new Promise(function(resolve, reject){
+        var id='up_'+Date.now()+'_'+Math.random().toString(36).slice(2);
+        window.__dsUploadCbs=window.__dsUploadCbs||{};
+        window.__dsUploadCbs[id]=function(json, ok){
+          try{
+            if(ok===false){ reject(new Error('upload failed')); return; }
+            var obj = (typeof json==='string') ? JSON.parse(json) : json;
+            var sid = obj && (obj.id || (obj.file&&obj.file.id));
+            if(sid) resolve(sid);
+            else reject(new Error('no file id'));
+          }catch(e){ reject(e); }
+        };
+        var type = blob && blob.type || (isImage?'image/jpeg':'application/octet-stream');
+        try{ window.DSNative.uploadFile(id, apiKey, b64, name||'upload', type, purpose||'', 'apikey', 'files'); }
+        catch(e){ reject(e); }
+      });
+    });
+  };
   log('bridge installed');
 })();
 </script>
